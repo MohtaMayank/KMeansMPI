@@ -104,10 +104,12 @@ int main (int argc, char *argv[]) {
 		iters++;
 		if(rank == 0) {
 			printf("Iteration %d:  ", iters);
-		}
+			printCentroids(curr_centroids,  k, dims);
+		} else {
 #ifdef DEBUG
 		printCentroids(curr_centroids,  k, dims);
 #endif
+		}
 	} while(!converged);	
 #ifdef DEBUG
 		//printPoints(my_points, k, dims, num_points_read);
