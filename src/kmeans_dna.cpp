@@ -14,7 +14,7 @@
 #define DONE_TAG 3
 #define SQUARE(x,y) (x - y)*(x - y)
 
-#define DEBUG 1
+//#define DEBUG 1
 
 typedef struct {
 	char coordinates[MAX_DIM]; //Using max dim for convenience
@@ -33,7 +33,7 @@ int iters;
 
 static void init_mpi_centroid_type();
 Point *read_points(char* data_file, int dims, long total_points, long* num_points_read);
-void initialize_centroids(Centroid * centroids, int k,  int dims);
+void initialize_centroids_from_file(char *base_file, Centroid * centroids, int k,  int dims);
 void initialize_centroids_from_points(Point* my_points, long num_points_read, Centroid *cs, int k, int dims);
 void compute_distances(Point *points, int num_points, Centroid *curr_centroids, Centroid *partial_centroids, int k, int dims);
 int str_distance(char* seq1, char* seq2, int length);
@@ -85,6 +85,8 @@ int main (int argc, char *argv[]) {
 			//initialize_centroids(curr_centroids, k, dims);
 			initialize_centroids_from_points(my_points, num_points_read, 
 												curr_centroids, k, dims);
+			/*initialize_centroids_from_file(data_file, 
+                        curr_centroids, k, dims);*/
 #ifdef DEBUG
 			printf("centroids initialized\n");
 #endif
@@ -102,8 +104,10 @@ int main (int argc, char *argv[]) {
 		iters++;
 		if(rank == 0) {
 			printf("Iteration %d:  ", iters);
-			printCentroids(curr_centroids,  k, dims);
 		}
+#ifdef DEBUG
+		printCentroids(curr_centroids,  k, dims);
+#endif
 	} while(!converged);	
 #ifdef DEBUG
 		//printPoints(my_points, k, dims, num_points_read);
@@ -177,6 +181,8 @@ Point *read_points(char* data_file, int dims, long total_points, long* num_point
 
 	*num_points_read = cnt;
 
+	fclose(fr);
+
 	return points;
 }
 
@@ -193,14 +199,25 @@ void initialize_centroids_from_points(Point* my_points, long num_points_read,
 	}
 }
 
-void initialize_centroids(Centroid * curr_centroids, int k, int dims) {
-		//Initialize the centroids - Assuming all points are between 0 and 1
-		srand((unsigned)time(NULL));
-		for(int i = 0; i < k; i++) {
-			for(int j = 0; j < dims; j++) {
-				curr_centroids[i].coordinates[j] = ((float)rand()/(float)RAND_MAX);
-			}
-		}
+
+void initialize_centroids_from_file(char *base_file, Centroid * centroids, int k,  int dims) {
+	char cent_file[200];
+	strcpy(cent_file, base_file);
+	strcat(cent_file, ".cent");
+	FILE *fr = fopen (cent_file, "r");  /* open the file for reading */
+
+	char line[MAX_DIM];
+	int i = 0;
+	while(fgets(line, 1024, fr) != NULL) {
+		if(i == k) {
+			break;
+		}		
+		strcpy(centroids[i].coordinates, line);
+		centroids[i].coordinates[dims] = '\0';
+		i++;
+	}
+
+	fclose(fr);
 }
 
 void compute_distances(Point *points, int num_points, Centroid *curr_centroids, Centroid *partial_centroids, int k, int dims) {	
@@ -256,7 +273,7 @@ int str_distance(char* seq1, char* seq2, int length) {
 			similarity++;
 		}
 	}
-	return similarity;
+	return (length - similarity);
 }
 
 /*
@@ -290,7 +307,7 @@ bool update_centroids(Centroid *curr_centroids, Centroid *partial_centroids, int
 				partial_centroids[j].num_points += tmp[j].num_points;
 				for(int d = 0; d < dims; d++) {
 					for(int b = 0; b < 4; b++) {		
-						partial_centroids[j].counts[d][b]++;
+						partial_centroids[j].counts[d][b] += tmp[j].counts[d][b];
 					}
 				}
 			}
@@ -315,22 +332,34 @@ bool update_centroids(Centroid *curr_centroids, Centroid *partial_centroids, int
 						max_base_count = count;
 					}
 				}
-				int old_base_index = get_dna_base_index(curr_centroids[i].coordinates[d]);
-				if(old_base_index == -1){
-					printf("ERROR3 %c!\n", curr_centroids[i].coordinates[d]);
-				}		
-				if(old_base_index != max_base_index) {
-					error += curr_centroids[i].counts[d][old_base_index] + max_base_count;
+
+				char new_base = get_dna_base(max_base_index);
+				int new_base_index = max_base_index;
+				int new_base_count = max_base_count;
+
+				char old_base = curr_centroids[i].coordinates[d];
+				int old_base_index = get_dna_base_index(old_base);
+				int old_base_count = curr_centroids[i].counts[d][old_base_index];
+						
+				if(old_base != new_base) {
+					error += old_base_count + new_base_count;
+					/*printf("Old base index=%d Old Base count=%d new base index=%d new base count=%d\n", 
+										old_base_index, old_base_count, max_base_index, max_base_count);*/
 				} else {
-					error += abs(curr_centroids[i].counts[d][old_base_index] - max_base_count);
+					if(abs(old_base_count - new_base_count)) {
+						/*printf("COUNTS DIFFER Old base=%c Old Base count=%d new base=%c new base count=%d\n", 
+										old_base, old_base_count, new_base, new_base_count);*/
+					}
+			
+					error += abs(old_base_count - new_base_count);
 				}
 				
 				for(int b = 0; b < 4; b++) {		
 					//Reset current centroid count.
 					curr_centroids[i].counts[d][b] = 0;
 				}
-				curr_centroids[i].coordinates[d] = get_dna_base(max_base_index);
-				curr_centroids[i].counts[d][max_base_index] = max_base_count;
+				curr_centroids[i].coordinates[d] = new_base;
+				curr_centroids[i].counts[d][get_dna_base_index(new_base)] = new_base_count;
 			}
 		}
 
@@ -354,9 +383,6 @@ bool update_centroids(Centroid *curr_centroids, Centroid *partial_centroids, int
 		//Receive the updated centroids from processor 0.
 		MPI_Recv(curr_centroids, k, mpi_centroid_type, 0, MPI_ANY_TAG,
             MPI_COMM_WORLD, &status);
-#ifdef DEBUG
-		printCentroids(curr_centroids,  k, dims);
-#endif
 		//printf("status tag %d\n", status.MPI_TAG);
 		if(status.MPI_TAG == DONE_TAG) {
 			converged = true;	
@@ -383,9 +409,6 @@ void broadcast_new_centroid(Centroid *curr_centroids, int k, int dims) {
 		//receive centroids from all other processors.
 		MPI_Recv(curr_centroids, k, mpi_centroid_type, 0, CENTROIDS_TAG,
               MPI_COMM_WORLD, &status);
-#ifdef DEBUG
-		printCentroids(curr_centroids, k, dims);
-#endif
 	}
 }
 
@@ -450,7 +473,7 @@ char get_dna_base(int index) {
 	} else if(index == 3) {
 		return 't';
 	} else {
-		//printf("ERROR in getting base for index %d", index);
-		return 0;
+		printf("ERROR in getting base for index %d", index);
+		return -1;
 	}
 }
