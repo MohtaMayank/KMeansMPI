@@ -78,19 +78,12 @@ int main (int argc, char *argv[]) {
 	//Allocate buffer for current centroids.
 	Centroid *curr_centroids= (Centroid *) malloc(k * sizeof(Centroid));
 	//Initialize curr_centroids
-	for(int i = 0; i < k; i++) {
-		curr_centroids[i].num_points = 1;
-		//The 0th proccessor initializes k random centroids.
-		if(rank == 0) {
-			//initialize_centroids(curr_centroids, k, dims);
-			initialize_centroids_from_points(my_points, num_points_read, 
-												curr_centroids, k, dims);
-			/*initialize_centroids_from_file(data_file, 
+	//The 0th proccessor initializes k random centroids.
+	if(rank == 0) {
+		initialize_centroids_from_points(my_points, num_points_read, 
+																		curr_centroids, k, dims);
+		/*initialize_centroids_from_file(data_file, 
                         curr_centroids, k, dims);*/
-#ifdef DEBUG
-			printf("centroids initialized\n");
-#endif
-		}
 	}
 
   broadcast_new_centroid(curr_centroids, k, dims);
